@@ -7,6 +7,8 @@ from tokenizers.trainers import WordLevelTrainer
 from tokenizers.pre_tokenizers import Whitespace
 from torch.utils.data import Dataset, DataLoader, random_split
 
+from dataset import BilingualDataset, casual_mask
+
 from pathlib import Path
 
 def get_all_sentences(ds, lang):
@@ -37,4 +39,17 @@ def get_ds(config):
     train_ds_size = len(0.9 * len(ds_raw))
     val_ds_size = 1 - train_ds_size
     train_ds_raw, val_ds_raw = random_split(ds_raw, [train_ds_size, val_ds_size])
-    
+
+    train_ds = BilingualDataset(train_ds_raw, tokenizer_src, tokenizer_tgt, config['lang_src'], config['lang_tgt'], config['seq_len'])
+    validation_ds = BilingualDataset(val_ds_raw, tokenizer_src, tokenizer_tgt, config['lang_src'], config['lang_tgt'], config['seq_len'])
+
+    max_len_src = 0
+    max_len_tgt = 0
+
+    for item in ds_raw:
+        src_ids = tokenizer_src.encode(item['translation'][config['lang_src']]).ids,
+        tgt_ids = tokenizer_src.encode(item['translation'][config['lang_tgt']]).ids,
+        max_len_src = max(max_len_src, len(src_ids))
+        max_len_tgt = max(max_len_tgt, len(tgt_ids))
+
+
