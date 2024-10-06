@@ -13,6 +13,7 @@ from Transformer import build_transformer
 from tqdm import tqdm
 from pathlib import Path
 import warnings
+from config import get_config, get_weights_file_path, latest_weights_file_path
 
 def get_all_sentences(ds, lang):
     for item in ds:
@@ -21,15 +22,20 @@ def get_all_sentences(ds, lang):
 def get_or_build_tokenizer(config, ds, lang):
     tokenizer_path = Path(config['tokenizer_file'].format(lang))
     if not Path.exists(tokenizer_path):
-        tokenizer = Tokenizer(WordLevel(unk_token = '[UNK]'))
+        # Most code taken from: https://huggingface.co/docs/tokenizers/quicktour
+        tokenizer = Tokenizer(WordLevel(unk_token="[UNK]"))
         tokenizer.pre_tokenizer = Whitespace()
-        trainer = WordLevelTrainer(special_tokens=["[UNK]", "[PAD]", "SOS", "[EOS]"], min_frequency = 2)
+        trainer = WordLevelTrainer(special_tokens=["[UNK]", "[PAD]", "[SOS]", "[EOS]"], min_frequency=2)
         tokenizer.train_from_iterator(get_all_sentences(ds, lang), trainer=trainer)
         tokenizer.save(str(tokenizer_path))
     else:
         tokenizer = Tokenizer.from_file(str(tokenizer_path))
+    
+    print(f"Tokenizer for {lang} vocabulary:")
+    print(tokenizer.get_vocab())
 
     return tokenizer
+
 
 def get_ds(config):
     ds_raw = load_dataset('opus_books', f'{config["lang_src"]}-{config["lang_tgt"]}', split='train')
@@ -50,8 +56,8 @@ def get_ds(config):
     max_len_tgt = 0
 
     for item in ds_raw:
-        src_ids = tokenizer_src.encode(item['translation'][config['lang_src']]).ids,
-        tgt_ids = tokenizer_src.encode(item['translation'][config['lang_tgt']]).ids,
+        src_ids = tokenizer_src.encode(item['translation'][config['lang_src']]).ids
+        tgt_ids = tokenizer_src.encode(item['translation'][config['lang_tgt']]).ids
         max_len_src = max(max_len_src, len(src_ids))
         max_len_tgt = max(max_len_tgt, len(tgt_ids))
 
@@ -65,7 +71,7 @@ def get_ds(config):
     return train_dataloader, val_dataloader, tokenizer_src, tokenizer_tgt
 
 def get_model(config, vocab_src_len, vocab_tgt_len):
-    model = build_transformer(vocab_src_len, vocab_tgt_len, config['seq_len'], config['seq_len'], config['d_model'])
+    model = build_transformer(vocab_src_len, vocab_tgt_len, config['seq_len'], config['seq_len'], d_model = config['d_model'])
 
     return model
 
@@ -74,8 +80,9 @@ def train_model(config):
     print(f"Using device {device}")
 
     Path(config['model_folder']).mkdir(parents=True, exist_ok=True)
+    # train_dataloader, val_dataloader, tokenizer_src, tokenizer_tgt = get_ds(config)
     train_dataloader, val_dataloader, tokenizer_src, tokenizer_tgt = get_ds(config)
-
+    print(f"Dataloader created. Train batches: {len(train_dataloader)}, Val batches: {len(val_dataloader)}")
     model = get_model(config, tokenizer_src.get_vocab_size(), tokenizer_tgt.get_vocab_size()).to(device)
 
     # Tensorboard
@@ -85,14 +92,17 @@ def train_model(config):
     optimizer = torch.optim.Adam(model.parameters(), lr=config['lr'], eps= 1e9)
     initial_epoch = 0
     global_step = 0
-
-    if config['preload']:
-        model_filename = get_weights_file_path(config, config['preload'])
-        print(f"Preloading model {model_filename}")
+    preload = config['preload']
+    model_filename = latest_weights_file_path(config) if preload == 'latest' else get_weights_file_path(config, preload) if preload else None
+    if model_filename:
+        print(f'Preloading model {model_filename}')
         state = torch.load(model_filename)
+        model.load_state_dict(state['model_state_dict'])
         initial_epoch = state['epoch'] + 1
         optimizer.load_state_dict(state['optimizer_state_dict'])
         global_step = state['global_step']
+    else:
+        print('No model to preload, starting from scratch')
 
     loss_fn = nn.CrossEntropyLoss(ignore_index = tokenizer_src.token_to_id('[PAD]'),label_smoothing=0.1).to(device)
 
@@ -103,7 +113,7 @@ def train_model(config):
             encoder_input = batch['encoder_input'].to(device) #(B, seq_len)
             decoder_input = batch['decoder_input'].to(device)  #(B, seq_len)
             encoder_mask = batch['encoder_mask'].to(device) #(B,1,1, seq_len)
-            decoder_mask = batch['decoder_input'].to(device) #(B, Seq_len, seq_len)
+            decoder_mask = batch['decoder_mask'].to(device) #(B, Seq_len, seq_len)
 
             #Run the tensors through the transformer
 

@@ -23,7 +23,7 @@
     },
     {
       "id": 2,
-      "content": "SOS",
+      "content": "[SOS]",
       "single_word": false,
       "lstrip": false,
       "rstrip": false,
@@ -51,7 +51,7 @@
     "vocab": {
       "[UNK]": 0,
       "[PAD]": 1,
-      "SOS": 2,
+      "[SOS]": 2,
       "[EOS]": 3,
       ",": 4,
       "the": 5,
